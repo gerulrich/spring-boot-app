@@ -17,6 +17,8 @@ pipeline {
                 sh '''
                     echo "PATH = ${PATH}"
                     echo "M2_HOME = ${M2_HOME}"
+                    echo "JENKINS_HOME = ${JENKINS_HOME}"
+                    echo "JAVA_HOME = ${JAVA_HOME}"
                     '''
                 script {
                     def jenkinsProperties = [buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '', numToKeepStr: '2'))]
@@ -49,6 +51,7 @@ pipeline {
                     newSnapshotVersion = versionConstituents.join('.') + "-SNAPSHOT"
                 }
 
+
                 timeout(time: 5, unit: 'MINUTES') {
                     script {
                         userInput = input(
@@ -58,13 +61,15 @@ pipeline {
                         ])
                     }
                 }
+
+
                 script {
                     releaseVersion = userInput['RELEASE_VERSION']
                     newSnapshotVersion = userInput['NEW_SNAPSHOT_VERSION']
-                    //Change current build name
-                    currentBuild.description = "Release $releaseVersion"
-                    echo "Release Version: $releaseVersion"
-                    echo "New snapshot version: $newSnapshotVersion"
+                     //Change current build name
+                     currentBuild.description = "Release $releaseVersion"
+                     echo "Release Version: $releaseVersion"
+                     echo "New snapshot version: $newSnapshotVersion"
                 }
             }
         }
@@ -72,6 +77,33 @@ pipeline {
         stage('Test') {
             steps {
                 sh "mvn --batch-mode -V -U -e clean test -Dsurefire.useFile=false"
+            }
+        }
+
+        stage('Sonar scan execution') {
+            // Run the sonar scan
+            steps {
+                script {
+                    withSonarQubeEnv {
+                        sh "mvn'  verify sonar:sonar -Dintegration-tests.skip=true -Dmaven.test.failure.ignore=true"
+                    }
+                }
+            }
+        }
+
+        // waiting for sonar results based into the configured web hook in Sonar server which push the status back to jenkins
+        stage('Sonar scan result check') {
+            steps {
+                timeout(time: 2, unit: 'MINUTES') {
+                    retry(3) {
+                        script {
+                            def qg = waitForQualityGate()
+                            if (qg.status != 'OK') {
+                                error "Pipeline aborted due to quality gate failure: ${qg.status}"
+                            }
+                        }
+                    }
+                }
             }
         }
 
